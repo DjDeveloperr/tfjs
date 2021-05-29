@@ -33,7 +33,13 @@ jobs:
       - name: Build tfjs
         run: cd tfjs && yarn && yarn build && yarn tsc && cp ./dist/tf.node.js ../build && cp ./dist/tf.node.js.map ../build
       - name: Push to Deno Branch
-        run: cd build && git init && git add -A && git commit -m "ci(deno_build)"
+        run: |
+          cd build
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]" 
+          git init
+          git add -A
+          git commit -m "ci(deno_build)"
       - name: Push changes
         uses: ad-m/github-push-action@master
         with:
