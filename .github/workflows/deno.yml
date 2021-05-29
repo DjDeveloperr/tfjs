@@ -5,7 +5,7 @@ on:
     branches: [master]
 
 jobs:
-  check-bats-version:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -17,18 +17,18 @@ jobs:
       - name: Create Build Directory
         run: mkdir build
       - name: Build tfjs-core
-        run: cd tfjs-core && yarn && yarn bundle && cp ./dist/tf-core.node.js ../build
+        run: cd tfjs-core && yarn && yarn tsc && yarn bundle && cp ./dist/tf-core.node.js ../build
       - name: Build tfjs-backend-cpu
-        run: cd tfjs-backend-cpu && yarn && yarn build && cp ./dist/tf-backend-cpu.node.js ../build
+        run: cd tfjs-backend-cpu && yarn && yarn tsc && yarn build && cp ./dist/tf-backend-cpu.node.js ../build
       - name: Build tfjs-backend-webgl
-        run: cd tfjs-backend-webgl && yarn && yarn build && cp ./dist/tf-backend-webgl.node.js ../build
+        run: cd tfjs-backend-webgl && yarn && yarn tsc && yarn build && cp ./dist/tf-backend-webgl.node.js ../build
       - name: Build tfjs-layers
-        run: cd tfjs-layers && yarn && yarn build && cp ./dist/tf-layers.node.js ../build
+        run: cd tfjs-layers && yarn && yarn tsc && yarn build && cp ./dist/tf-layers.node.js ../build
       - name: Build tfjs-data
-        run: cd tfjs-data && yarn && yarn build && cp ./dist/tf-data.node.js ../build
+        run: cd tfjs-data && yarn && yarn tsc && yarn build && cp ./dist/tf-data.node.js ../build
       - name: Build tfjs-converters
-        run: cd tfjs-converters && yarn && yarn build && cp ./dist/tf-comverters.node.js ../build
+        run: cd tfjs-converters && yarn && yarn tsc && yarn build && cp ./dist/tf-comverters.node.js ../build
       - name: Build tfjs-backend-webgpu
-        run: cd tfjs-backend-webgpu && yarn && yarn build && cp ./dist/tf-webgpu.node.js ../build
+        run: cd tfjs-backend-webgpu && yarn && yarn tsc && yarn build && cp ./dist/tf-webgpu.node.js ../build
       - name: Build tfjs
-        run: cd tfjs && yarn && yarn build && cp ./dist/tf.node.js ../build
+        run: cd tfjs && yarn && yarn build && yarn tsc && cp ./dist/tf.node.js ../build
