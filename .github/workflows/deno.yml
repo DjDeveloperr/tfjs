@@ -2,7 +2,7 @@ name: build tfjs_deno
 
 on:
   push:
-    branches: [main]
+    branches: [master]
 
 jobs:
   check-bats-version:
