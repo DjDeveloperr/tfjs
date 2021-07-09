@@ -19,13 +19,11 @@
 
 import './flags_webgpu';
 
-import {backend_util, DataStorage, DataType, engine, env, KernelBackend, RecursiveArray, TensorInfo, TimingInfo, util} from '@tensorflow/tfjs-core';
+import {backend_util, buffer, DataStorage, DataType, DataValues, engine, env, KernelBackend, Rank, RecursiveArray, ShapeMap, TensorBuffer, TensorInfo, TimingInfo, util} from '@tensorflow/tfjs-core';
 import {Glslang} from '@webgpu/glslang/dist/web-devel/glslang.onefile';
 
 import {BufferManager} from './buffer_manager';
-import {BinaryOpType, getBinaryOpString} from './kernels/binary_ops';
 import {FromPixelsProgram} from './kernels/FromPixels_utils/from_pixels_webgpu';
-import * as unary_op from './kernels/unary_op_webgpu';
 import * as webgpu_program from './kernels/webgpu_program';
 import * as webgpu_util from './webgpu_util';
 
@@ -75,9 +73,6 @@ export interface WebGPUTimingInfo extends TimingInfo {
 const CPU_HANDOFF_SIZE_THRESHOLD =
     env().getNumber('CPU_HANDOFF_SIZE_THRESHOLD');
 
-const DEFAULT_GPUBUFFER_USAGE =
-    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
-
 export class WebGPUBackend extends KernelBackend {
   device: GPUDevice;
   queue: GPUQueue;
@@ -111,6 +106,9 @@ export class WebGPUBackend extends KernelBackend {
 
   constructor(device: GPUDevice, glslang: Glslang, supportTimeQuery = false) {
     super();
+    if (!webgpu_util.isWebGPUSupported()) {
+      throw new Error('WebGPU is not supported on this device');
+    }
     this.layoutCache = {};
     this.pipelineCache = {};
     this.device = device;
@@ -133,6 +131,11 @@ export class WebGPUBackend extends KernelBackend {
 
   floatPrecision(): 32 {
     return 32;
+  }
+
+  defaultGpuBufferUsage(): number {
+    return GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC |
+        GPUBufferUsage.COPY_DST;
   }
 
   flushDisposalQueue() {
@@ -193,7 +196,8 @@ export class WebGPUBackend extends KernelBackend {
   }
 
   acquireBuffer(
-      byteSize: number, usage: GPUBufferUsageFlags = DEFAULT_GPUBUFFER_USAGE) {
+      byteSize: number,
+      usage: GPUBufferUsageFlags = this.defaultGpuBufferUsage()) {
     return this.bufferManager.acquireBuffer(byteSize, usage);
   }
 
@@ -242,10 +246,15 @@ export class WebGPUBackend extends KernelBackend {
     const byteSize =
         util.sizeFromShape(shape) * webgpu_util.GPUBytesPerElement(dtype);
 
+    // bool is stored in Uint8Array, converted it to Int32Array.
+    if (dtype === 'bool' && values instanceof Uint8Array) {
+      values = Int32Array.from(values);
+    }
+
     this.tensorMap.set(dataId, {
       dtype,
       values,
-      bufferInfo: {byteSize, usage: DEFAULT_GPUBUFFER_USAGE},
+      bufferInfo: {byteSize, usage: this.defaultGpuBufferUsage()},
       refCount: 1
     });
     return dataId;
@@ -265,7 +274,7 @@ export class WebGPUBackend extends KernelBackend {
     this.tensorMap.set(dataId, {
       dtype,
       values,
-      bufferInfo: {byteSize, usage: DEFAULT_GPUBUFFER_USAGE},
+      bufferInfo: {byteSize, usage: this.defaultGpuBufferUsage()},
       refCount
     });
   }
@@ -377,6 +386,21 @@ export class WebGPUBackend extends KernelBackend {
     }
     this.convertAndCacheOnCPU(dataId, vals);
     return vals;
+  }
+
+  bufferSync<R extends Rank>(t: TensorInfo): TensorBuffer<R> {
+    const data = this.readSync(t.dataId);
+    let decodedData = data as DataValues;
+    if (t.dtype === 'string') {
+      try {
+        // Decode the bytes into string.
+        decodedData = (data as Uint8Array[]).map(d => util.decodeString(d));
+      } catch {
+        throw new Error('Failed to decode encoded string bytes into utf-8');
+      }
+    }
+    return buffer(t.shape as ShapeMap[R], t.dtype, decodedData) as
+        TensorBuffer<R>;
   }
 
   async time(f: () => void): Promise<WebGPUTimingInfo> {
@@ -509,13 +533,19 @@ export class WebGPUBackend extends KernelBackend {
     arrays.forEach(array => {
       const arrayData = array.data;
 
-      if (array.type !== 'int32' && array.type !== 'float32') {
+      if (array.type !== 'int32' && array.type !== 'float32' &&
+          array.type !== 'uint32') {
         throw new Error(`${array.type} not supported!`);
       }
 
       if (array.type === 'int32') {
         arrayData.forEach(d => {
           uniformDataView.setInt32(dataViewIndex * BYTES_PER_ELEMENT, d, true);
+          dataViewIndex++;
+        });
+      } else if (array.type === 'uint32') {
+        arrayData.forEach(d => {
+          uniformDataView.setUint32(dataViewIndex * BYTES_PER_ELEMENT, d, true);
           dataViewIndex++;
         });
       } else {
@@ -567,7 +597,7 @@ export class WebGPUBackend extends KernelBackend {
       padding = Math.ceil(currentOffset / baseAlignment) * baseAlignment -
           currentOffset;
       for (let p = 0; p < padding; ++p) {
-        dimUniformsData.push({type: 'int32', data: [0]});
+        dimUniformsData.push({type: d.type, data: [0]});
         dataViewIndex++;
       }
       dimUniformsData.push({type: d.type, data: d.data});
@@ -585,20 +615,20 @@ export class WebGPUBackend extends KernelBackend {
     bindGroupLayoutEntries.push({
       binding: 0,
       visibility: GPUShaderStage.COMPUTE,
-      buffer: {type: 'storage' as const }
+      buffer: {type: 'storage' as const}
     });
     // Input buffer binding layout. Depends on variableNames length.
     for (let i = 0; i < inputEntrySize; i++) {
       bindGroupLayoutEntries.push({
         binding: i + 1,
         visibility: GPUShaderStage.COMPUTE,
-        buffer: {type: 'read-only-storage' as const }
+        buffer: {type: 'read-only-storage' as const}
       });
     }
     bindGroupLayoutEntries.push({
       binding: inputEntrySize + 1,
       visibility: GPUShaderStage.COMPUTE,
-      buffer: {type: 'uniform' as const }
+      buffer: {type: 'uniform' as const}
     });
     const bindGroupLayout =
         this.device.createBindGroupLayout({entries: bindGroupLayoutEntries});
@@ -614,7 +644,7 @@ export class WebGPUBackend extends KernelBackend {
     bindGroupLayoutEntries.push({
       binding: 0,
       visibility: GPUShaderStage.COMPUTE,
-      buffer: {type: 'storage' as const }
+      buffer: {type: 'storage' as const}
     });
     // Input buffer binding layout.
     bindGroupLayoutEntries.push({
@@ -626,7 +656,7 @@ export class WebGPUBackend extends KernelBackend {
     bindGroupLayoutEntries.push({
       binding: 2,
       visibility: GPUShaderStage.COMPUTE,
-      buffer: {type: 'uniform' as const }
+      buffer: {type: 'uniform' as const}
     });
     const fromPixelBindGroupLayout =
         this.device.createBindGroupLayout({entries: bindGroupLayoutEntries});
@@ -656,13 +686,17 @@ export class WebGPUBackend extends KernelBackend {
     let uniformsWithType: Array<{type: string; data: number[];}> =
         [{type: 'float32', data: [NaN]}];
     const bufferShapes = inputs.concat(output).map(d => d.shape);
+    let uniformsType = 'int32';
+    if (program.useWgsl) {
+      uniformsType = 'uint32';
+    }
     bufferShapes.map(d => {
-      uniformsWithType.push({type: 'int32', data: d});
+      uniformsWithType.push({type: uniformsType, data: d});
     });
     const strides = util.computeStrides(output.shape);
-    uniformsWithType.push({type: 'int32', data: strides});
+    uniformsWithType.push({type: uniformsType, data: strides});
     if (program.size != null) {
-      uniformsWithType.push({type: 'int32', data: [program.size]});
+      uniformsWithType.push({type: uniformsType, data: [program.size]});
     }
     if (programUniforms) {
       uniformsWithType = [...uniformsWithType, ...programUniforms];
@@ -827,25 +861,6 @@ export class WebGPUBackend extends KernelBackend {
             input =>
                 this.tensorMap.get(input.dataId).bufferInfo.buffer == null &&
                 util.sizeFromShape(input.shape) < sizeThreshold);
-  }
-
-  mapActivationToShaderProgram(
-      activation: backend_util.Activation, packed = false): string {
-    if (activation === 'linear') {
-      return unary_op.LINEAR;
-    } else if (activation === 'relu') {
-      return packed ? unary_op.RELU_VEC4 : unary_op.RELU;
-    } else if (activation === 'elu') {
-      return packed ? unary_op.ELU_VEC4 : unary_op.ELU;
-    } else if (activation === 'relu6') {
-      return unary_op.RELU6;
-    } else if (activation === 'prelu') {
-      return getBinaryOpString(BinaryOpType.PRELU, packed);
-    } else if (activation === 'sigmoid') {
-      return unary_op.SIGMOID;
-    }
-    throw new Error(`Activation ${
-        activation} has not been implemented for the WebGPU backend.`);
   }
 
   numDataIds() {

@@ -35,17 +35,6 @@ export function stringNGrams(args: {
     preserveShortSequences
   } = attrs;
   const {data, dataSplits} = inputs;
-
-  if (data.dtype !== 'string') {
-    throw new Error('Data must be of datatype string');
-  }
-  if (dataSplits.dtype !== 'int32') {
-    throw new Error('Data splits must be of datatype int32');
-  }
-  if (data.shape.length !== 1) {
-    throw new Error(`Data must be a vector, saw: ${data.shape}`);
-  }
-
   const $data = backend.readSync(data.dataId) as Uint8Array[];
   const $dataSplits = backend.readSync(dataSplits.dataId) as Int32Array;
 
