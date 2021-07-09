@@ -37,7 +37,7 @@ jobs:
       - name: Build tfjs
         run: cd tfjs && yarn && yarn build && yarn tsc && cp ./dist/tf.node.js ../build && cp ./dist/tf.node.js.map ../build
       - name: Run Transformer Script
-        run: cd build && deno run --allow-read --allow-write https://cdn.discordapp.com/attachments/718805724674785311/848060439782227968/conv.ts
+        run: cd build && deno run --allow-read --allow-write ../deno.ts
       - name: Push to Deno Branch
         run: |
           cd build
