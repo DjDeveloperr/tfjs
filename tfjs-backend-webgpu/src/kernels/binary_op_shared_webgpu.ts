@@ -18,10 +18,11 @@
 import {backend_util, util} from '@tensorflow/tfjs-core';
 
 import {getCoordsDataType} from '../shader_preprocessor';
+import {getGlobalIndexStringWgsl, getMainHeaderStringWgsl} from '../shader_preprocessor_wgsl';
 import {computeDispatch, flatDispatchLayout} from '../webgpu_util';
 import {BinaryOpType, getBinaryOpString} from './binary_op_util';
 
-import {WebGPUProgram} from './webgpu_program';
+import {getUseWgsl, WebGPUProgram} from './webgpu_program';
 
 export class BinaryOpSharedProgram implements WebGPUProgram {
   outputShape: number[];
@@ -34,6 +35,7 @@ export class BinaryOpSharedProgram implements WebGPUProgram {
   useSharedMemoryWithB: boolean;
   lastDimensionSize: number;
   op: BinaryOpType;
+  useWgsl: boolean;
   size: number;
   sizeFit: boolean;
 
@@ -41,14 +43,15 @@ export class BinaryOpSharedProgram implements WebGPUProgram {
       op: BinaryOpType, aShape: number[], bShape: number[],
       useSharedMemoryWithB: boolean) {
     // This is an experimental value when using shared memory.
-    const workGroupSizeX = 512;
+    // Note that the maximum of workgroup X dimension is 256.
+    const workGroupSizeX = 256;
     this.workGroupSize = [workGroupSizeX, 1, 1];
     this.outputShape = backend_util.assertAndGetBroadcastShape(aShape, bShape);
     this.dispatchLayout = flatDispatchLayout(this.outputShape);
     this.lastDimensionSize = useSharedMemoryWithB ? bShape[0] : aShape[0];
-    if (this.lastDimensionSize < 512) {
+    if (this.lastDimensionSize < 256) {
       this.workPerThread = 1;
-    } else if (this.lastDimensionSize < 1024) {
+    } else if (this.lastDimensionSize < 512) {
       this.workPerThread = 2;
     } else {
       this.workPerThread = 4;
@@ -56,8 +59,10 @@ export class BinaryOpSharedProgram implements WebGPUProgram {
     this.dispatch = computeDispatch(
         this.dispatchLayout, this.outputShape, this.workGroupSize,
         [this.workPerThread, 1, 1]);
+
     this.useSharedMemoryWithB = useSharedMemoryWithB;
     this.op = op;
+    this.useWgsl = getUseWgsl();
     this.size = util.sizeFromShape(this.outputShape);
     this.sizeFit =
         this.size % (this.workGroupSize[0] * this.workPerThread) === 0;
@@ -97,7 +102,7 @@ export class BinaryOpSharedProgram implements WebGPUProgram {
 
         shared float sharedBuf[${this.lastDimensionSize}];
         void main() {
-          int index = int(gl_GlobalInvocationID.x);
+          int index = getGlobalIndex();
           int localIndex = int(gl_LocalInvocationIndex);
 
           // Fill in the shared memory buffer. Here we need a loop to make sure
@@ -113,6 +118,57 @@ export class BinaryOpSharedProgram implements WebGPUProgram {
 
           for(int i = 0; i < ${this.workPerThread}; i++) {
             int flatIndex = index * ${this.workPerThread} + i;
+
+            ${writeDataSnippet}
+          }
+        }
+        `;
+    return userCode;
+  }
+
+  getUserCodeWgsl(): string {
+    const sharedIndexSnippet = this.lastDimensionSize > 1 ?
+        `coords[${this.outputShape.length - 1}]` :
+        '0';
+    const accessDataSnippet = this.useSharedMemoryWithB ?
+        `let a = getAAtOutCoordsByCoords(coords);
+         let b = sharedBuf[${sharedIndexSnippet}];` :
+        `let a = sharedBuf[${sharedIndexSnippet}];
+         let b = getBAtOutCoordsByCoords(coords);`;
+
+    const writeDataSnippet = this.sizeFit ?
+        `let coords = getCoordsFromFlatIndex(flatIndex);
+
+         ${accessDataSnippet}
+         setOutputFlat(flatIndex, binaryOperation(a, b));` :
+        `if(flatIndex < uniforms.size) {
+            let coords = getCoordsFromFlatIndex(flatIndex);
+
+            ${accessDataSnippet}
+            setOutputFlat(flatIndex, binaryOperation(a, b));
+          }`;
+    const opStr = getBinaryOpString(this.op, false, this.useWgsl);
+    const userCode = `
+        fn binaryOperation(a : f32, b : f32) -> f32 {
+          ${opStr}
+        }
+        var<workgroup> sharedBuf : array<f32, ${this.lastDimensionSize}>;
+        ${getMainHeaderStringWgsl(this.workGroupSize)} {
+          ${getGlobalIndexStringWgsl(this.workGroupSize)}
+
+          // Fill in the shared memory buffer. Here we need a loop to make sure
+          // that all data in A|B are uploaded when |sharedMemorySize| is larger
+          // than work group size.
+          for(var localIndex = localId.x; localIndex < ${
+        this.lastDimensionSize}u; localIndex = localIndex + ${
+        this.workGroupSize[0]}u) {
+            sharedBuf[localIndex] = f32(${
+        this.useSharedMemoryWithB ? 'B' : 'A'}.numbers[localIndex]);
+          }
+          workgroupBarrier();
+
+          for(var i = 0u; i < ${this.workPerThread}u; i = i + 1u) {
+            let flatIndex = index * ${this.workPerThread}u + i;
 
             ${writeDataSnippet}
           }

@@ -88,7 +88,7 @@ describeWebGPU('backend webgpu', () => {
 
     expect(endNumBytes - startNumBytes).toEqual(48);
     expect(endNumTensors - startNumTensors).toEqual(2);
-    expect(endNumBytesInGPU - startNumBytesInGPU).toEqual(-16);
+    expect(endNumBytesInGPU - startNumBytesInGPU).toEqual(-36);
 
     tf.test_util.expectArraysClose(
         dData, new Float32Array([9, 12, 15, 19, 26, 33]));
@@ -237,21 +237,5 @@ describeWebGPU('backend webgpu', () => {
 
     backend.getBuffer(t.dataId);
     expect(bufferManager.getNumUsedBuffers()).toBe(1);
-  });
-
-  it('should be possible to move data from webgl to webgpu', async () => {
-    tf.setBackend('webgl');
-    const a = tf.randomNormal([1, 65, 65, 256]);
-    const b = tf.randomNormal([1, 65, 65, 256]);
-    const c = tf.add(a, b);
-    await c.data();
-
-    const f = async () => {
-      tf.setBackend('webgpu');
-      const d = tf.add(a, b);
-      await d.data();
-      expect(() => d.dataSync()).not.toThrow();
-    };
-    await f();
   });
 });

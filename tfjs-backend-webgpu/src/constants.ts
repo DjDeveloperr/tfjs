@@ -15,13 +15,12 @@
  * =============================================================================
  */
 
-export function getWorkGroupSizeString(workGroupSize: [number, number, number]):
-    string {
-  if (workGroupSize == null) {
-    return '';
-  }
-  return `
-  [[stage(compute), workgroup_size(${workGroupSize[0]}, ${workGroupSize[1]}, ${
-      workGroupSize[2]})]]
-`;
-}
+export const MAX_COMPUTE_WORKGROUP_INVOCATIONS = 256;
+
+export const MAX_COMPUTE_PER_DIMENSION_DISPATCH_SIZE = 65535;
+
+export const MAX_COMPUTE_WORKGROUP_SIZE_X = 256;
+
+export const MAX_COMPUTE_WORKGROUP_SIZE_Y = 256;
+
+export const MAX_COMPUTE_WORKGROUP_SIZE_Z = 256;

@@ -16,10 +16,10 @@
  */
 import {util} from '@tensorflow/tfjs-core';
 
+import {getGlobalIndexStringWgsl, getMainHeaderStringWgsl} from '../shader_preprocessor_wgsl';
 import {computeDispatch, flatDispatchLayout} from '../webgpu_util';
-import {getWorkGroupSizeString} from '../webgpu_util_wgsl';
-import {getUnaryOpString, UnaryOpType} from './unary_op_util';
 
+import {getUnaryOpString, UnaryOpType} from './unary_op_util';
 import {getUseWgsl, WebGPUProgram} from './webgpu_program';
 
 export class UnaryOpProgram implements WebGPUProgram {
@@ -38,13 +38,13 @@ export class UnaryOpProgram implements WebGPUProgram {
     const workGroupSizeX = 128;
     this.workGroupSize = [workGroupSizeX, 1, 1];
     this.outputShape = outputShape;
+    this.size = util.sizeFromShape(this.outputShape);
     this.dispatchLayout = flatDispatchLayout(this.outputShape);
     this.dispatch = computeDispatch(
         this.dispatchLayout, this.outputShape, this.workGroupSize);
     this.useWgsl = getUseWgsl();
     this.op = op;
     this.shaderKey = `unary_${op}`;
-    this.size = util.sizeFromShape(this.outputShape);
   }
 
   getUserCode(): string {
@@ -54,7 +54,7 @@ export class UnaryOpProgram implements WebGPUProgram {
       }
 
       void main() {
-        int index = int(gl_GlobalInvocationID.x);
+        int index = getGlobalIndex();
         if (index < size)
         {
           float a = getAAtOutCoords();
@@ -69,12 +69,10 @@ export class UnaryOpProgram implements WebGPUProgram {
       fn unaryOperation(a : f32) -> f32 {
         ${getUnaryOpString(this.op, false, true)}
       }
-      ${getWorkGroupSizeString(this.workGroupSize)}
-      fn main([[builtin(global_invocation_id)]] globalId  : vec3<u32>) {
-        let index = globalId.x;
-        if (index < uniforms.size)
-        {
-          let a = getAAtOutCoordsByGlobalId(globalId);
+      ${getMainHeaderStringWgsl(this.workGroupSize)} {
+        ${getGlobalIndexStringWgsl(this.workGroupSize)}
+        if (index < uniforms.size) {
+          let a = getAAtOutCoordsByGlobalId(globalId, index);
           setOutputFlat(index, unaryOperation(a));
         }
       }

@@ -41,6 +41,7 @@ import {avgPoolGradConfig} from './kernels/AvgPoolGrad';
 import {batchMatMulConfig} from './kernels/BatchMatMul';
 import {batchToSpaceNDConfig} from './kernels/BatchToSpaceND';
 import {bincountConfig} from './kernels/Bincount';
+import {broadcastArgsConfig} from './kernels/BroadcastArgs';
 import {castConfig} from './kernels/Cast';
 import {ceilConfig} from './kernels/Ceil';
 import {clipByValueConfig} from './kernels/ClipByValue';
@@ -74,6 +75,7 @@ import {expandDimsConfig} from './kernels/ExpandDims';
 import {expm1Config} from './kernels/Expm1';
 import {FFTConfig} from './kernels/FFT';
 import {fillConfig} from './kernels/Fill';
+import {flipLeftRightConfig} from './kernels/FlipLeftRight';
 import {floorConfig} from './kernels/Floor';
 import {floorDivConfig} from './kernels/FloorDiv';
 import {fusedBatchNormConfig} from './kernels/FusedBatchNorm';
@@ -195,6 +197,7 @@ const kernelConfigs: KernelConfig[] = [
   avgPoolGradConfig,
   batchMatMulConfig,
   batchToSpaceNDConfig,
+  broadcastArgsConfig,
   castConfig,
   ceilConfig,
   clipByValueConfig,
@@ -228,6 +231,7 @@ const kernelConfigs: KernelConfig[] = [
   expandDimsConfig,
   expm1Config,
   fillConfig,
+  flipLeftRightConfig,
   floorConfig,
   floorDivConfig,
   fusedBatchNormConfig,
